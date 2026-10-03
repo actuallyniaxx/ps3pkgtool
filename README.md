@@ -109,6 +109,22 @@ on PC, or on the console by a separate homebrew).
   which is inherently slower. It uses the SHA extensions (SHA-NI) when the CPU has them
   and scales with the number of cores.
 
+### Real-world run
+
+Need for Speed Carbon folder game (25 files, 11.86 GB) on a Ryzen 7 7730U, Windows 11,
+debug package with SHA-NI:
+
+| | Time | Throughput |
+|---|---|---|
+| `extract` | 29 s | ~406 MB/s |
+| `create -r` | 54 s (hash pass + write pass) | ~438 MB/s |
+
+![extract](docs/extract-11.8gb.png)
+![create](docs/create-11.8gb.png)
+
+(The `create` screenshot predates a display fix: it counted both passes in one bar, hence
+the doubled MB figure. The package itself is 11.86 GB.)
+
 ## Limitations
 
 - `create` only makes debug-style packages (no finalized/retail output).

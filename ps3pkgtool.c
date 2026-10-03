@@ -38,7 +38,7 @@
 #define HAVE_X86 1
 #endif
 
-#define VERSION "1.1.0"
+#define VERSION "1.2.0"
 #define BUFSZ (16u * 1024 * 1024)
 #define ALIGN16(x) (((x) + 15ULL) & ~15ULL)
 
@@ -203,14 +203,15 @@ static uint64_t file_size(FILE *f)
 /* ------------------------------------------------------------------ */
 static double g_t0, g_last;
 static uint64_t g_done, g_total;
-static void progress_start(uint64_t total) { g_t0 = g_last = now(); g_done = 0; g_total = total; }
+static const char *g_label = "";
+static void progress_start(uint64_t total) { g_t0 = g_last = now(); g_done = 0; g_total = total; g_label = ""; }
 static void progress(int force)
 {
     double t = now();
     if (!force && t - g_last < 0.2) return;
     g_last = t;
     double el = t - g_t0, mb = g_done / 1048576.0;
-    fprintf(stderr, "\r  %5.1f%%  %.0f / %.0f MB  %.0f MB/s   ",
+    fprintf(stderr, "\r  %s%5.1f%%  %.0f / %.0f MB  %.0f MB/s   ", g_label,
             g_total ? 100.0 * g_done / g_total : 100.0, mb, g_total / 1048576.0,
             el > 0.001 ? mb / el : 0.0);
     if (force) fprintf(stderr, "\n");
@@ -1082,7 +1083,9 @@ static int build_pkg(const char *outpath, const char *cid, uint32_t ctype)
     printf("Packing %u items, %.1f MB\n", (unsigned)nitems, data_size / 1048576.0);
 
     /* pass 1: QA digest = SHA1(plaintext data)[3..19] */
-    progress_start(data_size * 2);
+    double t_start = now();
+    progress_start(data_size);
+    g_label = "hashing  ";
     memset(&s, 0, sizeof s);
     s.pass = 1;
     sha1_init(&s.sha);
@@ -1090,6 +1093,7 @@ static int build_pkg(const char *outpath, const char *cid, uint32_t ctype)
     sink_put(&s, metawork, (size_t)meta_len);
     emit_files(&s, buf);
     uint8_t dg[20], qa[16];
+    progress(1);
     sha1_final(&s.sha, dg);
     memcpy(qa, dg + 3, 16);
 
@@ -1128,6 +1132,8 @@ static int build_pkg(const char *outpath, const char *cid, uint32_t ctype)
     if (fwrite(head, 1, sizeof head, o) != sizeof head) die("write failed");
 
     /* pass 2: encrypt + write */
+    progress_start(data_size);
+    g_label = "writing  ";
     s.pass = 2; s.cr = &cr; s.out = o; s.off = 0;
     sink_put(&s, meta, (size_t)meta_len);
     emit_files(&s, buf);
@@ -1136,7 +1142,7 @@ static int build_pkg(const char *outpath, const char *cid, uint32_t ctype)
     if (fwrite(tail, 1, sizeof tail, o) != sizeof tail || fclose(o)) die("write failed");
     progress(1);
     printf("Created %s (%llu bytes) in %.2f s\n", outpath, (unsigned long long)(0x140 + data_size + 0x60),
-           now() - g_t0);
+           now() - t_start);
     return 0;
 }
 
@@ -1339,6 +1345,15 @@ int main(int argc, char **argv)
     if (wargv) {
         argv = xmalloc(sizeof(char *) * (size_t)(wargc + 1));
         for (int i = 0; i < wargc; i++) argv[i] = narrow(wargv[i]);
+        /* "C:\some dir\" : Windows reads the final \" as an escaped quote, so the argument
+           arrives ending in a literal ". No Windows path can contain one, so undo it. */
+        for (int i = 1; i < wargc; i++) {
+            char *q = strchr(argv[i], '"');
+            if (!q) continue;
+            if (q[1]) die("argument %d was mangled by a trailing backslash before a closing quote:\n"
+                          "         %s\n       Write \"C:\\dir\" instead of \"C:\\dir\\\".", i, argv[i]);
+            *q = 0;
+        }
         argv[wargc] = NULL;
         argc = wargc;
     }
