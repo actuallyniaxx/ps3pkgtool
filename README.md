@@ -117,7 +117,7 @@ debug package with SHA-NI:
 | | Time | Throughput |
 |---|---|---|
 | `extract` | 29 s | ~406 MB/s |
-| `create -r` | 52 s (hash pass + write pass) | ~438 MB/s |
+| `create -r` | 52 s (hash pass + write pass) | ~402 MB/s |
 
 ![extract](docs/extract-11.8gb.png)
 ![create](docs/create-11.8gb.png)
