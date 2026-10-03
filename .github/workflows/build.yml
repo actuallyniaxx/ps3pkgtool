@@ -39,7 +39,7 @@ jobs:
         run: ${{ matrix.cmd }}
 
       - name: Test
-        run: tests/roundtrip.sh ./${{ matrix.out }}
+        run: bash tests/roundtrip.sh ./${{ matrix.out }}
 
       - name: Package
         run: |
