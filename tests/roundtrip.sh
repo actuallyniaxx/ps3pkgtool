@@ -26,6 +26,13 @@ echo "== create / extract"
 diff -r src ex
 
 # no leading slash on -r: Git Bash on Windows would rewrite /dev_hdd0 into C:/Program Files/Git/dev_hdd0
+echo "== overwrite protection"
+if "$BIN" extract out.pkg ex </dev/null 2>/dev/null; then echo "extract overwrote without -f"; exit 1; fi
+if "$BIN" create src out.pkg </dev/null 2>/dev/null; then echo "create overwrote without -f"; exit 1; fi
+"$BIN" extract out.pkg ex -f
+"$BIN" create src out.pkg -f
+diff -r src ex
+
 echo "== custom install root"
 "$BIN" create src root.pkg -r dev_hdd0/GAMES/TEST00000
 "$BIN" list root.pkg | grep -q '\.\./\.\./\.\./dev_hdd0/GAMES/TEST00000/USRDIR/EBOOT.BIN'

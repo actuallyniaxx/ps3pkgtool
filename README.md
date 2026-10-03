@@ -29,13 +29,19 @@ gcc -O2 -static ps3pkgtool.c -o ps3pkgtool.exe -lshell32
 ```
 ps3pkgtool info    <file.pkg>                    show header + metadata
 ps3pkgtool list    <file.pkg>                    list contents
-ps3pkgtool extract <file.pkg> [outdir] [-v]      extract (retail or debug)
-ps3pkgtool create  <dir> <out.pkg> [-c CONTENTID] [-t TYPE] [-r ROOT] [-s SIZE]
-ps3pkgtool split   <file> [-s SIZE]              raw split into file.66600, .66601...
+ps3pkgtool extract <file.pkg> [outdir] [-v] [-f] extract (retail or debug)
+ps3pkgtool create  <dir> <out.pkg> [-c CONTENTID] [-t TYPE] [-r ROOT] [-s SIZE] [-f]
+ps3pkgtool split   <file> [-s SIZE] [-f]         raw split into file.66600, .66601...
 ps3pkgtool join    <file.66600> [out] [-f]       join the parts back
 ps3pkgtool selftest                              check the crypto on this CPU
 ps3pkgtool version                               print the version
 ```
+
+### Overwriting
+
+If an output file already exists, `extract`, `create`, `split` and `join` ask once before
+overwriting. Pass `-f` to overwrite without asking (for scripts or when you leave it running).
+With no console attached and no `-f`, the tool stops instead of waiting for an answer.
 
 ### Extract
 
@@ -100,7 +106,8 @@ on PC, or on the console by a separate homebrew).
 
 - Retail packages are AES-128-CTR; with AES-NI this is limited by your disk.
 - Debug packages use a SHA-1 based keystream (two SHA-1 blocks per 16 bytes),
-  which is inherently slower. It scales with the number of cores.
+  which is inherently slower. It uses the SHA extensions (SHA-NI) when the CPU has them
+  and scales with the number of cores.
 
 ## Limitations
 

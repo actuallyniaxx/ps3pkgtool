@@ -21,6 +21,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <shellapi.h>
+#include <io.h>
 #define fseek64 _fseeki64
 #define ftell64 _ftelli64
 #else
@@ -37,7 +38,7 @@
 #define HAVE_X86 1
 #endif
 
-#define VERSION "1.0.0"
+#define VERSION "1.1.0"
 #define BUFSZ (16u * 1024 * 1024)
 #define ALIGN16(x) (((x) + 15ULL) & ~15ULL)
 
@@ -143,6 +144,25 @@ static double now(void)
 }
 #endif
 
+static int g_force = 0;
+static int path_exists(const char *p) { int d; uint64_t s; return path_stat(p, &d, &s) == 0; }
+/* ask before overwriting; -f skips the question, and with no console we refuse instead of hanging */
+static void confirm_overwrite(const char *what)
+{
+    if (g_force) return;
+#ifdef _WIN32
+    int tty = _isatty(_fileno(stdin));
+#else
+    int tty = isatty(fileno(stdin));
+#endif
+    if (!tty) die("%s (run with -f to overwrite without asking)", what);
+    fprintf(stderr, "%s\nOverwrite? [y/N] (use -f to never be asked): ", what);
+    fflush(stderr);
+    char line[32];
+    if (!fgets(line, sizeof line, stdin) || !strchr("yYsS", line[0])) die("aborted, nothing was overwritten");
+    g_force = 1; /* one answer covers the rest of this run */
+}
+
 static char *pathcat(const char *a, const char *b)
 {
     size_t la = strlen(a), lb = strlen(b);
@@ -204,7 +224,7 @@ typedef struct { uint32_t h[5]; uint64_t len; uint8_t buf[64]; unsigned n; } Sha
 #define ROL(x, n) (((x) << (n)) | ((x) >> (32 - (n))))
 static const uint32_t SHA1_IV[5] = { 0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0 };
 
-static void sha1_compress(uint32_t h[5], const uint8_t *p)
+static void sha1_compress_c(uint32_t h[5], const uint8_t *p)
 {
     uint32_t w[80], a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], t;
     int i;
@@ -217,6 +237,57 @@ static void sha1_compress(uint32_t h[5], const uint8_t *p)
     for (; i < 80; i++) { RND(b ^ c ^ d, 0xCA62C1D6) }
 #undef RND
     h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e;
+}
+
+static int use_shani = 0;
+#ifdef HAVE_X86
+/* one SHA-1 block with the SHA extensions (4 rounds per instruction) */
+__attribute__((target("sha,sse4.1,ssse3")))
+static void sha1_compress_ni(uint32_t h[5], const uint8_t *p)
+{
+    const __m128i rev = _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    __m128i abcd = _mm_shuffle_epi32(_mm_loadu_si128((const __m128i *)h), 0x1B);
+    __m128i e0 = _mm_set_epi32((int)h[4], 0, 0, 0);
+    const __m128i abcd0 = abcd, e00 = e0;
+    __m128i m0 = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i *)(p + 0)), rev);
+    __m128i m1 = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i *)(p + 16)), rev);
+    __m128i m2 = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i *)(p + 32)), rev);
+    __m128i m3 = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i *)(p + 48)), rev);
+    __m128i e, prev;
+#define STEP(m, f) e = _mm_sha1nexte_epu32(prev, m); prev = abcd; abcd = _mm_sha1rnds4_epu32(abcd, e, f);
+#define NEXT(a, b, c, d) a = _mm_sha1msg2_epu32(_mm_xor_si128(_mm_sha1msg1_epu32(a, b), c), d);
+    e = _mm_add_epi32(e0, m0); prev = abcd; abcd = _mm_sha1rnds4_epu32(abcd, e, 0);
+    STEP(m1, 0) STEP(m2, 0) STEP(m3, 0)
+    NEXT(m0, m1, m2, m3) STEP(m0, 0)
+    NEXT(m1, m2, m3, m0) STEP(m1, 1)
+    NEXT(m2, m3, m0, m1) STEP(m2, 1)
+    NEXT(m3, m0, m1, m2) STEP(m3, 1)
+    NEXT(m0, m1, m2, m3) STEP(m0, 1)
+    NEXT(m1, m2, m3, m0) STEP(m1, 1)
+    NEXT(m2, m3, m0, m1) STEP(m2, 2)
+    NEXT(m3, m0, m1, m2) STEP(m3, 2)
+    NEXT(m0, m1, m2, m3) STEP(m0, 2)
+    NEXT(m1, m2, m3, m0) STEP(m1, 2)
+    NEXT(m2, m3, m0, m1) STEP(m2, 2)
+    NEXT(m3, m0, m1, m2) STEP(m3, 3)
+    NEXT(m0, m1, m2, m3) STEP(m0, 3)
+    NEXT(m1, m2, m3, m0) STEP(m1, 3)
+    NEXT(m2, m3, m0, m1) STEP(m2, 3)
+    NEXT(m3, m0, m1, m2) STEP(m3, 3)
+#undef STEP
+#undef NEXT
+    e = _mm_sha1nexte_epu32(prev, e00);
+    abcd = _mm_add_epi32(abcd, abcd0);
+    _mm_storeu_si128((__m128i *)h, _mm_shuffle_epi32(abcd, 0x1B));
+    h[4] = (uint32_t)_mm_extract_epi32(e, 3);
+}
+#endif
+static void sha1_compress(uint32_t h[5], const uint8_t *p)
+{
+#ifdef HAVE_X86
+    if (use_shani) { sha1_compress_ni(h, p); return; }
+#endif
+    sha1_compress_c(h, p);
 }
 static void sha1_init(Sha1 *s) { memcpy(s->h, SHA1_IV, sizeof s->h); s->len = 0; s->n = 0; }
 static void sha1_update(Sha1 *s, const uint8_t *p, size_t len)
@@ -266,7 +337,12 @@ static void aes_init(void)
     sbox[0] = 0x63;
 #ifdef HAVE_X86
     unsigned a, b, c, d;
-    if (__get_cpuid(1, &a, &b, &c, &d) && (c & (1u << 25)) && (c & (1u << 9))) use_aesni = 1;
+    int sse41 = 0;
+    if (__get_cpuid(1, &a, &b, &c, &d)) {
+        if ((c & (1u << 25)) && (c & (1u << 9))) use_aesni = 1;
+        sse41 = (c & (1u << 19)) && (c & (1u << 9));
+    }
+    if (sse41 && __get_cpuid_count(7, 0, &a, &b, &c, &d) && (b & (1u << 29))) use_shani = 1;
 #endif
 }
 static void aes_expand(const uint8_t key[16], uint8_t rk[176])
@@ -673,7 +749,20 @@ static int cmd_extract(const char *path, const char *outdir, int verbose)
     for (uint32_t i = 0; i < p.nitems; i++)
         if (!p.e[i].is_dir) { total += p.e[i].size; nfiles++; }
     printf("Extracting %s -> %s  (%u files, %.1f MB, %s%s)\n", p.cid, outdir, nfiles, total / 1048576.0,
-           p.retail ? "AES" : "debug", (p.retail && use_aesni) ? "-NI" : "");
+           p.retail ? "AES" : "debug", p.retail ? (use_aesni ? "-NI" : "") : (use_shani ? ", SHA-NI" : ""));
+    uint32_t clash = 0;
+    for (uint32_t i = 0; i < p.nitems && !g_force; i++) {
+        Entry *e = &p.e[i];
+        if (e->is_dir || sanitize(e->name)) continue;
+        char *out = pathcat(outdir, e->name);
+        if (path_exists(out) && clash++ < 5) fprintf(stderr, "  exists: %s\n", out);
+        free(out);
+    }
+    if (clash) {
+        char msg[96];
+        snprintf(msg, sizeof msg, "%u file(s) already exist in the output folder", clash);
+        confirm_overwrite(msg);
+    }
     uint8_t *buf = xmalloc(BUFSZ);
     progress_start(total);
     for (uint32_t i = 0; i < p.nitems; i++) {
@@ -897,15 +986,22 @@ static int cmd_create(const char *dir, const char *outpath, const char *cid_arg,
     }
     if (prefix) printf("Install root: /%s (content id %s)\n", prefix + 9, cid);
     if (nitems > 4000000) die("too many files");
-    if (!part) return build_pkg(outpath, cid, ctype);
+    if (!part) {
+        if (path_exists(outpath)) {
+            char *msg = xmalloc(strlen(outpath) + 32);
+            sprintf(msg, "'%s' already exists", outpath);
+            confirm_overwrite(msg);
+        }
+        return build_pkg(outpath, cid, ctype);
+    }
 
     /* multi-pkg mode: every part is a standalone pkg holding all the directory entries plus
        a slice of the files; installing them in any order rebuilds the whole tree */
     Item *all = items;
-    size_t nall = nitems, ndirs = 0;
+    size_t nall = nitems;
     uint64_t base = 0x1A0;
     for (size_t i = 0; i < nall; i++)
-        if (all[i].is_dir) { ndirs++; base += 0x20 + ALIGN16(strlen(all[i].rel)); }
+        if (all[i].is_dir) { base += 0x20 + ALIGN16(strlen(all[i].rel)); }
     if (base >= part) die("part size too small");
     int toobig = 0;
     for (size_t i = 0; i < nall; i++) {
@@ -939,6 +1035,12 @@ static int cmd_create(const char *dir, const char *outpath, const char *cid_arg,
     int has_ext = ol > 4 && (!strcmp(outpath + ol - 4, ".pkg") || !strcmp(outpath + ol - 4, ".PKG"));
     char *name = xmalloc(ol + 32);
     Item *sub = xmalloc(sizeof(Item) * nall);
+    int pclash = 0;
+    for (int p = 1; p <= nparts && !g_force; p++) {
+        sprintf(name, "%.*s_%dp.pkg", (int)(has_ext ? ol - 4 : ol), outpath, p);
+        if (path_exists(name) && pclash++ < 5) fprintf(stderr, "  exists: %s\n", name);
+    }
+    if (pclash) confirm_overwrite("some of the output pkgs already exist");
     printf("Splitting into %d pkgs of up to %llu bytes\n", nparts, (unsigned long long)part);
     for (int p = 1; p <= nparts; p++) {
         size_t n = 0;
@@ -1076,6 +1178,12 @@ static int cmd_split(const char *path, uint64_t part)
     if (nparts > 100) die("that would be %llu parts; max is 100 (.66600-.66699)", (unsigned long long)nparts);
     uint8_t *buf = xmalloc(BUFSZ);
     char *name = xmalloc(strlen(path) + 8);
+    int sclash = 0;
+    for (uint64_t i = 0; i < nparts && !g_force; i++) {
+        sprintf(name, "%s.666%02u", path, (unsigned)i);
+        if (path_exists(name) && sclash++ < 5) fprintf(stderr, "  exists: %s\n", name);
+    }
+    if (sclash) confirm_overwrite("some of the output parts already exist");
     printf("Splitting into %llu parts of up to %llu bytes\n", (unsigned long long)nparts, (unsigned long long)part);
     progress_start(size);
     for (uint64_t i = 0; i < nparts; i++) {
@@ -1111,7 +1219,12 @@ static int cmd_join(const char *path, const char *outpath, int force)
         total += sz;
     }
     if (!n) die("no parts found (looked for '%s.66600')", base);
-    if (!force && !path_stat(outpath, &is_dir, &sz)) die("'%s' already exists (use -f to overwrite)", outpath);
+    (void)force;
+    if (path_exists(outpath)) {
+        char *msg = xmalloc(strlen(outpath) + 32);
+        sprintf(msg, "'%s' already exists", outpath);
+        confirm_overwrite(msg);
+    }
     FILE *o = xfopen(outpath, "wb");
     if (!o) die("cannot create '%s': %s", outpath, strerror(errno));
     setvbuf(o, NULL, _IONBF, 0);
@@ -1164,6 +1277,28 @@ static int cmd_selftest(void)
     int ni = use_aesni;
     use_aesni = 0; crypt_run(&c, 5, a, sizeof a);
     use_aesni = ni; crypt_run(&c, 5, b, sizeof b);
+    {
+        int sn = use_shani, sbad = 0;
+        uint8_t blk[64], k1[997], k2[997], dig[16];
+        uint32_t h1[5], h2[5];
+        for (int r = 0; r < 64 && sn; r++) {
+            for (int i = 0; i < 64; i++) blk[i] = (uint8_t)(i * 31 + r * 7 + (i ^ r));
+            memcpy(h1, SHA1_IV, sizeof h1); memcpy(h2, SHA1_IV, sizeof h2);
+            h1[0] ^= (uint32_t)r * 0x9E3779B9u; h2[0] = h1[0];
+            use_shani = 0; sha1_compress(h1, blk);
+            use_shani = 1; sha1_compress(h2, blk);
+            if (memcmp(h1, h2, sizeof h1)) sbad = 1;
+        }
+        for (int i = 0; i < 16; i++) dig[i] = (uint8_t)(0xA0 + i);
+        Crypt dc;
+        crypt_debug(&dc, dig);
+        memset(k1, 0, sizeof k1); memset(k2, 0, sizeof k2);
+        use_shani = 0; crypt_run(&dc, 7, k1, sizeof k1);
+        use_shani = sn; crypt_run(&dc, 7, k2, sizeof k2);
+        if (memcmp(k1, k2, sizeof k1)) sbad = 1;
+        if (sbad) bad = 1;
+        printf("SHA-NI       : %s\n", !sn ? "not available (portable path in use)" : sbad ? "FAIL" : "ok");
+    }
     printf("AES-NI       : %s\n", !ni ? "not available (portable path in use)"
                                       : memcmp(a, b, sizeof a) ? (bad = 1, "FAIL") : "ok");
     return bad;
@@ -1175,11 +1310,11 @@ static void usage(void)
 "ps3pkgtool " VERSION " - fast PS3 PKG extractor / creator / splitter\n\n"
 "  ps3pkgtool info    <file.pkg>                    show header + metadata\n"
 "  ps3pkgtool list    <file.pkg>                    list contents\n"
-"  ps3pkgtool extract <file.pkg> [outdir] [-v]      extract (retail or debug)\n"
-"  ps3pkgtool create  <dir> <out.pkg> [-c CONTENTID] [-t TYPE] [-r ROOT] [-s SIZE]\n"
+"  ps3pkgtool extract <file.pkg> [outdir] [-v] [-f] extract (retail or debug)\n"
+"  ps3pkgtool create  <dir> <out.pkg> [-c CONTENTID] [-t TYPE] [-r ROOT] [-s SIZE] [-f]\n"
 "                                                   build a debug-style pkg from a folder\n"
 "                                                   (PARAM.SFO, ICON0.PNG, USRDIR/... at its root)\n"
-"  ps3pkgtool split   <file> [-s SIZE]              raw split (like rar volumes) into file.66600...\n"
+"  ps3pkgtool split   <file> [-s SIZE] [-f]         raw split (like rar volumes) into file.66600...\n"
 "                                                   (default 4294901760 = FAT32 safe)\n"
 "  ps3pkgtool join    <file.66600> [out] [-f]       join the parts back\n"
 "  ps3pkgtool selftest                              check the crypto on this CPU\n"
@@ -1191,7 +1326,9 @@ static void usage(void)
 "  create -s: make several standalone pkgs (out_1p.pkg, out_2p.pkg...) of up to SIZE each,\n"
 "             to be installed one after another, instead of a single big one\n"
 "  TYPE     : content type, default 5 (GameExec); 4 = GameData, 9 = Theme...\n"
-"  SIZE     : bytes, or with K/M/G suffix (e.g. 4095M)\n");
+"  SIZE     : bytes, or with K/M/G suffix (e.g. 4095M)\n"
+"  -f       : overwrite existing files without asking (extract, create, split, join).\n"
+"             Without it you are asked once; with no console attached it stops instead.\n");
 }
 
 int main(int argc, char **argv)
@@ -1220,7 +1357,7 @@ int main(int argc, char **argv)
     for (int i = 2; i < argc; i++) {
         const char *a = argv[i];
         if (!strcmp(a, "-v")) verbose = 1;
-        else if (!strcmp(a, "-f")) force = 1;
+        else if (!strcmp(a, "-f") || !strcmp(a, "-y")) force = g_force = 1;
         else if (!strcmp(a, "-c") && i + 1 < argc) cid = argv[++i];
         else if (!strcmp(a, "-r") && i + 1 < argc) root = argv[++i];
         else if (!strcmp(a, "-t") && i + 1 < argc) ctype = (uint32_t)strtoul(argv[++i], NULL, 0);
