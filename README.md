@@ -68,6 +68,9 @@ custom installer packages use:
 ps3pkgtool create BLUS30016 nfs.pkg -r /dev_hdd0/GAMES/BLUS30016
 ```
 
+(In Git Bash / MSYS on Windows drop the leading slash, `-r dev_hdd0/GAMES/BLUS30016`,
+or the shell rewrites it into a Windows path. PowerShell and cmd are fine either way.)
+
 **Several installable packages** (`-s`): instead of one big package, write
 `out_1p.pkg`, `out_2p.pkg`... of up to the given size. Each one is a complete
 package holding a slice of the files; install them all, in any order.
@@ -108,3 +111,7 @@ on PC, or on the console by a separate homebrew).
 
 Format knowledge comes from public homebrew documentation and tools
 (psdevwiki, PSL1GHT's `pkg.py`, RPCS3). No official SDK material was used.
+
+## License
+
+[MIT](LICENSE): do what you want with it, just keep the copyright notice.

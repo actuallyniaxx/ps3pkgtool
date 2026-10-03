@@ -24,14 +24,15 @@ echo "== create / extract"
 "$BIN" extract out.pkg ex
 diff -r src ex
 
+# no leading slash on -r: Git Bash on Windows would rewrite /dev_hdd0 into C:/Program Files/Git/dev_hdd0
 echo "== custom install root"
-"$BIN" create src root.pkg -r /dev_hdd0/GAMES/TEST00000
+"$BIN" create src root.pkg -r dev_hdd0/GAMES/TEST00000
 "$BIN" list root.pkg | grep -q '\.\./\.\./\.\./dev_hdd0/GAMES/TEST00000/USRDIR/EBOOT.BIN'
 "$BIN" extract root.pkg rx
 diff -r src rx/dev_hdd0/GAMES/TEST00000
 
 echo "== multi-pkg"
-"$BIN" create src multi.pkg -r /dev_hdd0/GAMES/TEST00000 -s 6M
+"$BIN" create src multi.pkg -r dev_hdd0/GAMES/TEST00000 -s 6M
 test -f multi_1p.pkg && test -f multi_2p.pkg
 for f in multi_*p.pkg; do "$BIN" extract "$f" mx; done
 diff -r src mx/dev_hdd0/GAMES/TEST00000

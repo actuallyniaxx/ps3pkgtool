@@ -37,7 +37,7 @@
 #define HAVE_X86 1
 #endif
 
-#define VERSION "1.4.1"
+#define VERSION "1.4.2"
 #define BUFSZ (16u * 1024 * 1024)
 #define ALIGN16(x) (((x) + 15ULL) & ~15ULL)
 
@@ -869,6 +869,10 @@ static int cmd_create(const char *dir, const char *outpath, const char *cid_arg,
         }
         while (d > r && d[-1] == '/') d--;
         *d = 0;
+        if (strchr(r, ':'))
+            die("bad install root '%s': that looks like a PC path.\n"
+                "       Git Bash/MSYS rewrites arguments starting with '/', so write it without the\n"
+                "       leading slash there: -r dev_hdd0/GAMES/MyGame", root_arg);
         if (!*r || strstr(r, "..")) die("bad install root '%s' (use e.g. /dev_hdd0/GAMES/MyGame)", root_arg);
         prefix = xmalloc(strlen(r) + 16);
         sprintf(prefix, "../../../%s", r);

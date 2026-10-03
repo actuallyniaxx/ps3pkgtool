@@ -45,9 +45,9 @@ jobs:
         run: |
           mkdir dist
           if [ "${{ runner.os }}" = "Windows" ]; then
-            7z a "dist/ps3pkgtool-${{ matrix.name }}.zip" "${{ matrix.out }}" README.md
+            7z a "dist/ps3pkgtool-${{ matrix.name }}.zip" "${{ matrix.out }}" README.md LICENSE
           else
-            tar czf "dist/ps3pkgtool-${{ matrix.name }}.tar.gz" "${{ matrix.out }}" README.md
+            tar czf "dist/ps3pkgtool-${{ matrix.name }}.tar.gz" "${{ matrix.out }}" README.md LICENSE
           fi
 
       - uses: actions/upload-artifact@v4
