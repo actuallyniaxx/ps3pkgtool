@@ -1,4 +1,5 @@
 ps3pkgtool
 ps3pkgtool.exe
+release.bat
 *.pkg
 *.666[0-9][0-9]

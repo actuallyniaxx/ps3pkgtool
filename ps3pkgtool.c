@@ -37,7 +37,7 @@
 #define HAVE_X86 1
 #endif
 
-#define VERSION "1.4.2"
+#define VERSION "1.0.0"
 #define BUFSZ (16u * 1024 * 1024)
 #define ALIGN16(x) (((x) + 15ULL) & ~15ULL)
 
@@ -1182,7 +1182,8 @@ static void usage(void)
 "  ps3pkgtool split   <file> [-s SIZE]              raw split (like rar volumes) into file.66600...\n"
 "                                                   (default 4294901760 = FAT32 safe)\n"
 "  ps3pkgtool join    <file.66600> [out] [-f]       join the parts back\n"
-"  ps3pkgtool selftest                              check the crypto on this CPU\n\n"
+"  ps3pkgtool selftest                              check the crypto on this CPU\n"
+"  ps3pkgtool version                               print the version\n\n"
 "  CONTENTID: 36 chars, e.g. UP0001-GR33N0000_00-0000000000000000\n"
 "             (if omitted it is built from TITLE_ID in PARAM.SFO)\n"
 "  ROOT     : custom install path on the PS3, e.g. /dev_hdd0/GAMES/MyGame\n"
@@ -1228,6 +1229,10 @@ int main(int argc, char **argv)
         else if (npos < 4) pos[npos++] = a;
     }
 
+    if (!strcmp(cmd, "version") || !strcmp(cmd, "--version") || !strcmp(cmd, "-V")) {
+        printf("ps3pkgtool " VERSION "\n");
+        return 0;
+    }
     if (!strcmp(cmd, "selftest")) return cmd_selftest();
     if (!strcmp(cmd, "info") && npos == 1) return cmd_info(pos[0]);
     if (!strcmp(cmd, "list") && npos == 1) return cmd_list(pos[0]);

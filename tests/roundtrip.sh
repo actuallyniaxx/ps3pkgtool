@@ -5,6 +5,7 @@ BIN="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT; cd "$T"
 
 "$BIN" selftest
+"$BIN" version | grep -Eq '^ps3pkgtool [0-9]+\.[0-9]+\.[0-9]+$'
 
 mkdir -p src/USRDIR/sub/empty
 # minimal PARAM.SFO carrying TITLE_ID=TEST00000

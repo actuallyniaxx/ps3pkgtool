@@ -34,6 +34,7 @@ ps3pkgtool create  <dir> <out.pkg> [-c CONTENTID] [-t TYPE] [-r ROOT] [-s SIZE]
 ps3pkgtool split   <file> [-s SIZE]              raw split into file.66600, .66601...
 ps3pkgtool join    <file.66600> [out] [-f]       join the parts back
 ps3pkgtool selftest                              check the crypto on this CPU
+ps3pkgtool version                               print the version
 ```
 
 ### Extract
@@ -111,6 +112,11 @@ on PC, or on the console by a separate homebrew).
 
 Format knowledge comes from public homebrew documentation and tools
 (psdevwiki, PSL1GHT's `pkg.py`, RPCS3). No official SDK material was used.
+
+## Releasing
+
+Bump `VERSION` in `ps3pkgtool.c`, then run `release.bat` (Windows). It commits, pushes and
+pushes a `v<VERSION>` tag; GitHub Actions builds the binaries and publishes the release.
 
 ## License
 
