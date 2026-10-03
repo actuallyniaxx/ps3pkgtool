@@ -1,0 +1,62 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x64
+            out: ps3pkgtool
+            cmd: gcc -O2 -Wall -Wextra ps3pkgtool.c -o ps3pkgtool -lpthread
+          - os: windows-latest
+            name: windows-x64
+            out: ps3pkgtool.exe
+            cmd: gcc -O2 -Wall -Wextra -static ps3pkgtool.c -o ps3pkgtool.exe -lshell32
+          - os: macos-latest
+            name: macos-universal
+            out: ps3pkgtool
+            cmd: clang -O2 -Wall -Wextra -arch arm64 -arch x86_64 -mmacosx-version-min=11.0 ps3pkgtool.c -o ps3pkgtool
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: ${{ matrix.cmd }}
+
+      - name: Test
+        run: tests/roundtrip.sh ./${{ matrix.out }}
+
+      - name: Package
+        run: |
+          mkdir dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "dist/ps3pkgtool-${{ matrix.name }}.zip" "${{ matrix.out }}" README.md
+          else
+            tar czf "dist/ps3pkgtool-${{ matrix.name }}.tar.gz" "${{ matrix.out }}" README.md
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ps3pkgtool-${{ matrix.name }}
+          path: dist/*
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
